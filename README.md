@@ -1,6 +1,8 @@
 # ![ParaParams](./resources/64x64.png) Fusion360ParaParam
 
-This script is used for parametrically modifying a user parameter.  For each iteration an operation may be performed such as exporting to STL.
+This script is used for parametrically modifying a user parameter.  For each iteration an operation may be performed such as exporting to STL.  This is very useful for automating variations of a design and exporting those variations.
+
+*NOTE* The set of operations are limited in this initial release.  More added later.
 
 ![Image of ParaParam Dialog]
 (./resources/ParaParams-Step-7-ParaParam-Dialog.png)
