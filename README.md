@@ -9,19 +9,24 @@ This script is used for parametrically modifying a user parameter.  For each ite
 
 ## Installation
 
-Copy the script folder into your Fusion 360 "My Scripts" folder. You may find this folder using the following steps:
+Copy the "Fusion360ParaParams" folder into your Fusion 360 "My Scripts" folder. You may find this folder using the following steps:
 
-1. Start Fusion 360 and then select the File -> Scripts... menu item
-2. The Scripts Manager dialog will appear and display the "My Scripts" folder and "Sample Scripts" folders
+1. Start Fusion 360 and then select the File -> "Scripts and Add-Ins..." menu item
+2. The Scripts and Add-Ins dialog will appear and display the "My Scripts" and "Sample Scripts" folders
 3. Select one of the "My Scripts" files and then click on the "+" Details icon near the bottom of the dialog.
-  - If there are no files in the "My Scripts" folder then create a default one.
-  - Click the Create button, select JavaScript, and then OK.
-4. With the user script selected, click the Full Path "..." button to display a file explorer window that will display the "My Scripts" folder
-5. Copy the folder into this location
+  - If there are no files in the "My Scripts" folder then create a default one by clicking the Create button, select JavaScript, and then OK.
+4. With a user script selected and the "Details" section expanded, look at the Full Path value.  This contains the location of the user scripts folder.
+5. Copy this script's folder into that location.
+  For example, on my Mac the folder is located in:
+    /Users/USERNAME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts
+  And on Windows:
+    C:\users\USERNAME\AppData\Roaming\Autodesk\Autodesk Fusion 360\API\Scripts
+6. Now add the script to the lists of "My Scripts"
+7. Click the "+" icon next to the "my Scripts" item
+  - The "Add new script" dialog should appear.
+8. Locate the ForceEffectImport.js file in the folder you copied, select it, and click Open. The script should now be installed and ready to be run.
 
-For example, on my Mac the folder is located in:
-
-/Users/USERNAME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts
+The script should be ready to run.
 
 ## Usage
 
@@ -92,7 +97,7 @@ Here is an example of using the script to export several variations of a design.
 3. Display the Change Parameters dialog after the gear has been created.
 
   ![Change Parameters dialog](./resources/ParaParams-Step-2-SpurGear-Params.png)
-  
+
 4. In the dialog, click the green '+' icon next to the User Parameters category.
 5. In the Add User Parameter dialog, set the name to "Teeth", unit to "No Unit", expression to 24, then click OK.
 
