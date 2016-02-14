@@ -27,7 +27,7 @@ For example, on a Mac the folder is located in:
 */
 
 /*globals adsk*/
-(function () {
+function run(context) {
 
     "use strict";
 
@@ -358,5 +358,4 @@ For example, on a Mac the folder is located in:
         ui.messageBox('Script Failed : ' + (e.description ? e.description : e));
         adsk.terminate();
     }
-
-}());
+}
