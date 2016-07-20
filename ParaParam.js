@@ -26,6 +26,8 @@ For example, on a Mac the folder is located in:
 
 */
 
+// /Volumes/Master/Users/hans/Library/Containers/com.autodesk.mas.fusion360/Data/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts/
+
 /*globals adsk*/
 function run(context) {
 
@@ -39,7 +41,6 @@ function run(context) {
 
     var PARAM_OPERATION = {
         LOOP_ONLY: 0,
-        //CLONE_SELECTION: 1,
         EXPORT_FUSION: 1,
         EXPORT_IGES: 2,
         EXPORT_SAT: 3,
@@ -67,8 +68,19 @@ function run(context) {
         return;
     }
 
+    var progressDialog = null;
+
+    // What to do after each update (export, etc)
+    var paramOperation = null;
+
+    // This is the parameter info to update.  The format is:
+    //   ParamName, StartValue, EndValue, StepValue
+    var paramsInfo = [];
+
     // Get the current user parameters
-    var paramsList = design.userParameters;
+    var userParamsList = design.userParameters;
+
+    var paramGroupInput = null; // Group input control in dialog
 
     // Create the command definition.
     var createCommandDefinition = function() {
@@ -79,7 +91,7 @@ function run(context) {
         if (!cmDef) {
             cmDef = commandDefinitions.addButtonDefinition('ParaParam',
                     'ParaParam',
-                    'Parametrically drives a user parameter.',
+                    'Parametrically drives user parameters.',
                     './resources'); // relative resource file path is specified
         }
         return cmDef;
@@ -88,9 +100,11 @@ function run(context) {
     // CommandCreated event handler.
     var onCommandCreated = function(args) {
         try {
-            // Connect to the CommandExecuted event.
             var command = args.command;
+
+            // Connect to the events.
             command.execute.add(onCommandExecuted);
+            command.inputChanged.add(onInputChangedHandler);
 
             // Terminate the script when the command is destroyed
             command.destroy.add(function () { adsk.terminate(); });
@@ -100,23 +114,34 @@ function run(context) {
 
             var paramInput = inputs.addDropDownCommandInput('param', 'Which Parameter', adsk.core.DropDownStyles.TextListDropDownStyle );
 
-            // Get the parameter names
-            for (var iParam = 0; iParam < paramsList.count; ++iParam) {
-                paramInput.listItems.add(paramsList.item(iParam).name,(iParam === 0));
+            // The first item indicates a CSV file for param info should be selected and used
+            paramInput.listItems.add("Use Param CSV File", true);
+
+            // Add the user parameter names
+            for (var iParam = 0; iParam < userParamsList.count; ++iParam) {
+                paramInput.listItems.add(userParamsList.item(iParam).name, false);
             }
 
+            // Create group to hold single param inputs (non CSV)
+            var groupInput = inputs.addGroupCommandInput("groupinput", "Single Parameter");
+            groupInput.isExpanded = true;
+            groupInput.isEnabled = true;
+
+            paramGroupInput = groupInput;   // HACK: Save off so changed handler can ref
+
             var valueStart = adsk.core.ValueInput.createByReal(1.0);
-            inputs.addValueInput('valueStart', 'Start Value', 'cm' , valueStart);
+            groupInput.children.addValueInput('valueStart', 'Start Value', 'cm' , valueStart);
 
             var valueEnd = adsk.core.ValueInput.createByReal(10.0);
-            inputs.addValueInput('valueEnd', 'End Value', 'cm' , valueEnd);
+            groupInput.children.addValueInput('valueEnd', 'End Value', 'cm' , valueEnd);
 
-            var valueInc = adsk.core.ValueInput.createByReal(1.0);
-            inputs.addValueInput('valueInc', 'Increment Value', 'cm' , valueInc);
+            var valueStep = adsk.core.ValueInput.createByReal(1.0);
+            groupInput.children.addValueInput('valueStep', 'Increment Value', 'cm' , valueStep);
+
+            // Operation section
 
             var operInput = inputs.addDropDownCommandInput('operation', 'Operation', adsk.core.DropDownStyles.TextListDropDownStyle );
             operInput.listItems.add('Value Only',true);
-            //operInput.listItems.add('Clone Selected Bodies',false);
             operInput.listItems.add('Export to Fusion',false);
             operInput.listItems.add('Export to IGES',false);
             operInput.listItems.add('Export to SAT',false);
@@ -124,15 +149,211 @@ function run(context) {
             operInput.listItems.add('Export to STEP',false);
             operInput.listItems.add('Export to STL',false);
 
-            //SelectionCommandInput
-            //var selInput = inputs.addSelectionInput('selection','Selection','Select bodies for operation or none');
-            //selInput.addSelectionFilter( 'Bodies' );    // and Faces and/or sketch elements?
-
-            //BoolValueCommandInput
-            inputs.addBoolValueInput('pause', 'Pause each iteration', true);
+            var restoreValues = inputs.addBoolValueInput('restoreValues', 'Restore Values On Finish', true);
+            restoreValues.value = false;
         }
         catch (e) {
-            ui.messageBox('Failed to create command : ' + (e.description ? e.description : e));
+            ui.messageBox('Failed to create command : ' + (e.message ? e.message : e));
+        }
+    };
+
+    // Event handler for the inputChanged event.
+    var onInputChangedHandler = function(args) {
+        eventArgs = adsk.core.InputChangedEventArgs(args);
+
+        var cmdInput = eventArgs.input;
+        if (cmdInput != null && cmdInput.id == "param") {
+            var paramInput = adsk.core.DropDownCommandInput(cmdInput);
+
+            var iParam = paramInput.selectedItem.index;
+            if (paramGroupInput) {
+                var enable = (iParam > 0);   // Enable/Disable group
+                //paramGroupInput.isEnabled = enable;
+                paramGroupInput.isExpanded = enable;
+            }
+        }
+    };
+
+    var Uint8ToString = function(u8Arr) {
+        var CHUNK_SIZE = 0x8000; //arbitrary number
+        var index = 0;
+        var length = u8Arr.length;
+        var result = '';
+        var slice;
+        while (index < length) {
+            slice = u8Arr.subarray(index, Math.min(index + CHUNK_SIZE, length));
+            result += String.fromCharCode.apply(null, slice);
+            index += CHUNK_SIZE;
+        }
+        return result; //btoa(result);
+    };
+
+    var LoadParamsCSVFile = function() {
+
+        // prompt for the filename
+        var dlg = ui.createFileDialog();
+        dlg.title = 'Select Parameters CSV File';
+        dlg.filter = 'CSV Files (*.csv);;All Files (*.*)';
+
+        if (dlg.showOpen() != adsk.core.DialogResults.DialogOK)
+            return false;
+
+        var csvFilename = dlg.filename;
+
+        // Read the csv file.
+        var cnt = 0;
+        var arrayBuffer = adsk.readFile(csvFilename);
+        var allLines = Uint8ToString(new Uint8Array(arrayBuffer));
+
+        var linesCSV = allLines.split(/\r?\n/);
+
+        var linesCSVCount = linesCSV.length;
+        for (var i = 0; i < linesCSVCount; ++i) {
+
+            var line = linesCSV[i].trim();
+
+            // Is this line empty?
+            if (line === "") {
+
+                // Skip over multiple blank lines (treat as one)
+                for (++i ; line === "" && i < linesCSVCount; ++i) {
+                    line = linesCSV[i].trim();
+                }
+
+                if (i == linesCSVCount) {
+                    break;  // No more lines
+                }
+            }
+
+            // Get the values from the csv line.
+            // Format:
+            //  ParamName, StartValue, EndValue, Step
+            var pieces = line.split(',');
+
+            if ( pieces.length != 4 ) {
+                ui.messageBox("Invalid line: " + cnt + " - CSV file: " + csvFilename);
+                adsk.terminate();
+            }
+
+            if (isNaN(pieces[1]) || isNaN(pieces[2]) || isNaN(pieces[3])) {
+                ui.messageBox("Invalid param value at line: " + cnt + " - CSV file: " + csvFilename);
+                adsk.terminate();
+            }
+
+            var paramName  = pieces[0];
+            var paramStart = Number(pieces[1]);
+            var paramEnd   = Number(pieces[2]);
+            var paramStep  = Number(pieces[3]);
+
+            paramsInfo.push({name: paramName, valueStart: paramStart, valueEnd: paramEnd, valueStep: paramStep});
+
+            cnt += 1;
+        }
+
+        return true;
+    };
+
+    // Now begin the param updates.  This is a recursive function which will
+    // iterate over each param and update.
+    var UpdateParams = function(whichParam, paramValues, exportFilenamePrefix) {
+
+        var curParam = paramsInfo[whichParam];
+
+        // Validate loop params
+        if (curParam.valueStep <= 0) {
+            ui.messageBox("Value increment must be greater than zero");
+            return false;
+        }
+
+        if (curParam.valueStart > curParam.valueEnd) {
+            curParam.valueStep = -curParam.valueStep;
+        }
+        else if (curParam.valueStart == curParam.valueEnd) {
+            ui.messageBox("Start value must not equal End value");
+            return false;
+        }
+
+        // Get the actual parameter to modify
+        var userParam = userParamsList.itemByName(curParam.name);
+        if (!userParam) {
+            return false;
+        }
+
+        var resExport = 0;
+
+        // Loop from valueStart to valueEnd incrementing by valueStep
+        for (var val = curParam.valueStart;
+             (curParam.valueStep > 0) ? val <= curParam.valueEnd : val >= curParam.valueEnd;
+             val += curParam.valueStep) {
+
+            // note - setting the 'value' property does not change the value.  Must set expression.
+            // REVIEW: Handle unit conversion
+            userParam.expression = '' + val; // + ' cm';
+
+            // TODO: dialog not hiding at end
+            //progressDialog.message = "Updating parameter '" + curParam.name + "' to " + userParam.expression;
+
+            // Track in running values
+            paramValues[curParam.name] = userParam.expression;
+
+            // If exporting then we need to build the name for this iteration
+            var exportFilename = "";
+            if (exportFilenamePrefix && exportFilenamePrefix !== "") {
+                // TODO: Better name based on all params
+                exportFilename = exportFilenamePrefix + '_' + curParam.name + '_' + val; // TODO value to string
+            }
+
+            // Is this a leaf node?
+            if ( whichParam == paramsInfo.length - 1 ) {
+
+                // Yes, so perform the operation specified.
+                var exportMgr = design.exportManager;
+
+                switch (paramOperation)
+                {
+                    case PARAM_OPERATION.LOOP_ONLY:
+                        // Nothing
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_FUSION:
+                        var fusionArchiveOptions = exportMgr.createFusionArchiveExportOptions(exportFilename+'.f3d');
+                        resExport = exportMgr.execute(fusionArchiveOptions);
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_IGES:
+                        var igesOptions = exportMgr.createIGESExportOptions(exportFilename+'.igs');
+                        resExport = exportMgr.execute(igesOptions);
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_SAT:
+                        var satOptions = exportMgr.createSATExportOptions(exportFilename+'.sat');
+                        resExport = exportMgr.execute(satOptions);
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_SMT:
+                        var smtOptions = exportMgr.createSMTExportOptions(exportFilename+'.smt');
+                        resExport = exportMgr.execute(smtOptions);
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_STEP:
+                        var stepOptions = exportMgr.createSTEPExportOptions(exportFilename+'.step');
+                        resExport = exportMgr.execute(stepOptions);
+                        break;
+
+                    case PARAM_OPERATION.EXPORT_STL:
+                        var stlOptions = exportMgr.createSTLExportOptions(design.rootComponent, exportFilename+'.stl');
+                        //stlOptions.isBinaryFormat = true;
+                        //stlOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh;
+                        resExport = exportMgr.execute(stlOptions);
+                        break;
+                }
+            }
+            else { // Not a leaf node so iterate downward
+
+                for (var iParam = whichParam+1; iParam < paramsInfo.length; ++iParam) {
+                    UpdateParams(iParam, paramValues, exportFilename);
+                }
+            }
         }
     };
 
@@ -145,7 +366,7 @@ function run(context) {
             var command = adsk.core.Command(args.firingEvent.sender);
             var inputs = command.commandInputs;
 
-            var paramInput, valueStartInput, valueEndInput, valueIncInput, operationInput, selInput, pauseInput;
+            var paramInput, valueStartInput, valueEndInput, valueStepInput, operationInput, restoreValuesInput;
 
             // REVIEW: Problem with a problem - the inputs are empty at this point. We
             // need access to the inputs within a command during the execute.
@@ -160,65 +381,62 @@ function run(context) {
                 else if (input.id === 'valueEnd') {
                     valueEndInput = adsk.core.ValueCommandInput(input);
                 }
-                else if (input.id === 'valueInc') {
-                    valueIncInput = adsk.core.ValueCommandInput(input);
+                else if (input.id === 'valueStep') {
+                    valueStepInput = adsk.core.ValueCommandInput(input);
                 }
                 else if (input.id === 'operation') {
                     operationInput = adsk.core.DropDownCommandInput(input);
                 }
-                else if (input.id === 'selection') {
-                    selInput = adsk.core.SelectionCommandInput(input);
-                }
-                else if (input.id === 'pause') {
-                    pauseInput = adsk.core.BoolValueCommandInput(input);
+                else if (input.id === 'restoreValues') {
+                    restoreValuesInput = adsk.core.BoolValueCommandInput(input);
                 }
             }
 
-            if (!paramInput || !valueStartInput || !valueEndInput || !valueIncInput || !operationInput || !pauseInput) { // || !selInput) {
+            if (!paramInput || !valueStartInput || !valueEndInput || !valueStepInput || !operationInput || !restoreValuesInput) {
                 ui.messageBox("One of the inputs does not exist.");
                 return;
             }
 
-            // holds the parameters that drive the parameter.  How meta!
-            var params = {
-                paramName: "",
-                valueStart: 0.0,
-                valueEnd: 1.0,
-                valueInc: 0.1,
-                operation: PARAM_OPERATION.LOOP_ONLY,
-                pause: false,
-                exportFilename: ""
-            };
-
+            // What param to use or param CSV file?
             var iParam = paramInput.selectedItem.index;
             if (iParam < 0) {
-                ui.messageBox("No parameter name selected");
+                ui.messageBox("No parameter selected");
                 return false;
             }
 
-            params.paramName = paramsList.item(iParam).name;
+            // Use param CSV file?
+            if (iParam == 0) {
+                // Prompt for then load param info from file.
+                if (!LoadParamsCSVFile()) {
+                    return false;
+                }
+            }
+            else {
+                // Add single param info to the list.
+                paramsInfo.push({
+                    name:       userParamsList.item(iParam-1).name,     // Note, subtract 1 since iParam == 0 is CSV file entry
+                    valueStart: unitsMgr.evaluateExpression(valueStartInput.expression),
+                    valueEnd:   unitsMgr.evaluateExpression(valueEndInput.expression),
+                    valueStep:  unitsMgr.evaluateExpression(valueStepInput.expression)
+                });
+            }
 
-            params.valueStart = unitsMgr.evaluateExpression(valueStartInput.expression);
-            params.valueEnd = unitsMgr.evaluateExpression(valueEndInput.expression);
-            params.valueInc = unitsMgr.evaluateExpression(valueIncInput.expression);
-
-            params.operation = operationInput.selectedItem.index;
-            if (params.operation < 0 || params.operation > PARAM_OPERATION.LAST) {
+            // What to do after each param update?
+            paramOperation = operationInput.selectedItem.index;
+            if (paramOperation < 0 || paramOperation > PARAM_OPERATION.LAST) {
                 ui.messageBox("Invalid operation");
                 return false;
             }
 
-            var isExporting = (params.operation >= PARAM_OPERATION.EXPORT_FUSION && params.operation <= PARAM_OPERATION.EXPORT_STL);
-
-            params.pause = pauseInput.value;
-
             // If operation is an export then prompt for folder location.
+            var exportFilenamePrefix = "";
+            var isExporting = (paramOperation >= PARAM_OPERATION.EXPORT_FUSION && paramOperation <= PARAM_OPERATION.EXPORT_STL);
             if (isExporting) {
 
                 // Prompt for the base filename to use for the exports.  This will
                 // be appended with a counter or step value.
                 var dlg = ui.createFileDialog();
-                dlg.title = 'Select Export Filename';
+                dlg.title = 'Select Export Filename Prefix';
                 dlg.filter = 'All Files (*.*)';
                 if (dlg.showSave() !== adsk.core.DialogResults.DialogOK) {
                     return false;
@@ -236,107 +454,64 @@ function run(context) {
                     return false;
                 }
 
-                params.exportFilename = filename;
+                // TESTING
+                //var tmpDir = adsk.tempDirectory();
+                //exportFilenamePrefix = tmpDir + "test";
+                // "/var/folders/hx/nckzmpbd78xgd90krgjrwq940000gn/T/com.autodesk.mas.fusion360/test_Width_1"
+
+                exportFilenamePrefix = filename;
             }
 
-            // Validate loop params
-            if (params.valueInc <= 0) {
-                ui.messageBox("Value increment must be positive and none zero");
-                return false;
-            }
+            // Before doing the potential long param update operations, display a progress dialog
+            // TODO: dialog not hiding at end
+            //progressDialog = ui.createProgressDialog();
+            //progressDialog.cancelButtonText = 'Cancel';
+            //progressDialog.isBackgroundTranslucent = false;
+            //progressDialog.isCancelButtonShown = true;
 
-            if (params.valueStart > params.valueEnd) {
-                params.valueInc = -params.valueInc;
-            }
-            else if (params.valueStart == params.valueEnd) {
-                ui.messageBox("Start value must not equal end value");
-                return false;
-            }
+            // Show dialog
+            //progressDialog.show('ParaParam Progress', 'Generating parameters...', 0, paramsInfo.length);
 
-            // Get the actual parameter to modify
-            var param = paramsList.itemByName(params.paramName);
-            if (!param) {
-                return false;
-            }
+            // How many params are we changing?
+            var paramsCount = paramsInfo.length;
 
-            var exportMgr = design.exportManager;   // used if exporting
-            var resExport = 0;
+            // Track current param value (expression) while iterating over all
+            var paramValues = {};
 
-            // Loop from valueStart to valueEnd incrementing by valueInc
-            for (var iStep = params.valueStart;
-                 (params.valueInc > 0) ? iStep <= params.valueEnd : iStep >= params.valueEnd;
-                 iStep += params.valueInc) {
+            // Save off the original param values so we can restore later
+            var userParamValuesOriginal = [];
+            for (var iParam = 0; iParam < paramsCount; ++iParam) {
 
-                // note - setting the 'value' property does not change the value.  Must set expression
-                param.expression = '' + iStep; // + ' cm';
+                // Get the custom param info
+                var curParam = paramsInfo[iParam];
 
-                // If exporting then we need to build the name for this iteration
-                var exportFilenamePrefix = params.exportFilename;
-                if (isExporting) {
-                    exportFilenamePrefix += '_'+params.paramName+'_'+iStep;
+                // Get the actual parameter to modify
+                var userParam = userParamsList.itemByName(curParam.name);
+                if (!userParam) {
+                    break;
                 }
 
-                // Now do the post increment operation
-                switch (params.operation)
-                {
-                    case PARAM_OPERATION.LOOP_ONLY:
-                        // Nothing
-                        break;
+                userParamValuesOriginal[curParam.name] = userParam.expression;
 
-                    case PARAM_OPERATION.CLONE_SELECTION:
-                        // Need to clone selected bodies
-                        var selCount = selInput.selectionCount;
-                        if (selCount > 0) {
-                            for (var iSel = 0; iSel < selCount; ++iSel) {
-                                var selItem = selInput.selection(iSel);
-                                //if (selItem.objectType === 'BRepBody')
-                                if (selItem.copy()) {
-                                    // ARGH - No support for paste in the API
-                                }
-                            }
-                        }
+                paramValues[curParam.name] = userParam.expression;
+            }
 
-                        break;
+            // Now begin the param updates.  This is a recursive function which will
+            // iterate over each param and update.  It's really just a way of doing
+            // the following but for an arbitrary number of params:
+            // for (i = 0; i < iCount; ++i)
+            //   for (j = 0; j < jCount; ++j)
+            //     for (k = 0; k < kCount; ++k)
+            //       print value(i,j,k)
+            UpdateParams(0, paramValues, exportFilenamePrefix);
 
-                    case PARAM_OPERATION.EXPORT_FUSION:
-                        var fusionArchiveOptions = exportMgr.createFusionArchiveExportOptions(exportFilenamePrefix+'.f3d');
-                        resExport = exportMgr.execute(fusionArchiveOptions);
-                        break;
-
-                    case PARAM_OPERATION.EXPORT_IGES:
-                        var igesOptions = exportMgr.createIGESExportOptions(exportFilenamePrefix+'.igs');
-                        resExport = exportMgr.execute(igesOptions);
-                        break;
-
-                    case PARAM_OPERATION.EXPORT_SAT:
-                        var satOptions = exportMgr.createSATExportOptions(exportFilenamePrefix+'.sat');
-                        resExport = exportMgr.execute(satOptions);
-                        break;
-
-                    case PARAM_OPERATION.EXPORT_SMT:
-                        var smtOptions = exportMgr.createSMTExportOptions(exportFilenamePrefix+'.smt');
-                        resExport = exportMgr.execute(smtOptions);
-                        break;
-
-                    case PARAM_OPERATION.EXPORT_STEP:
-                        var stepOptions = exportMgr.createSTEPExportOptions(exportFilenamePrefix+'.step');
-                        resExport = exportMgr.execute(stepOptions);
-                        break;
-
-                    case PARAM_OPERATION.EXPORT_STL:
-                        var stlOptions = exportMgr.createSTLExportOptions(design.rootComponent, exportFilenamePrefix+'.stl');
-                        stlOptions.isBinaryFormat = true;
-                        stlOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh;
-                        resExport = exportMgr.execute(stlOptions);
-                        break;
-                }
-
-                // Pause each iteration?
-                if (params.pause) {
-                    //DialogResults
-                    var dlgres = ui.messageBox('Pausing iteration at ' + iStep, 'Iteration Paused', adsk.core.MessageBoxButtonTypes.OKCancelButtonType);
-                    if (dlgres !== 0) {
-                        break;  // Cancel iteration.
+            // Restore original param values on finish?
+            if ( restoreValuesInput.value ) {
+                for (var paramName in userParamValuesOriginal) {
+                    if (userParamValuesOriginal.hasOwnProperty(paramName)) {
+                        // Get the actual parameter to modify
+                        var userParam = userParamsList.itemByName(paramName);
+                        userParam.expression = userParamValuesOriginal[paramName];
                     }
                 }
             }
@@ -344,6 +519,13 @@ function run(context) {
         catch (e) {
             ui.messageBox('Failed to execute command : ' + (e.description ? e.description : e));
         }
+
+        // Make sure this is gone.  Sometimes hangs around!
+        // TODO: dialog not hiding at end
+        //if (progressDialog) {
+        //    progressDialog.hide();
+        //    progressDialog = null;
+        //}
     };
 
     // Create and run command
@@ -355,7 +537,7 @@ function run(context) {
         command.execute();
     }
     catch (e) {
-        ui.messageBox('Script Failed : ' + (e.description ? e.description : e));
+        ui.messageBox('Script Failed : ' + (e.message ? e.message : e));
         adsk.terminate();
     }
 }

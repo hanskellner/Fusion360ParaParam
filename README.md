@@ -24,7 +24,7 @@ Copy the "Fusion360ParaParams" folder into your Fusion 360 "My Scripts" folder. 
 6. Now add the script to the lists of "My Scripts"
 7. Click the "+" icon next to the "my Scripts" item
   - The "Add new script" dialog should appear.
-8. Locate the ForceEffectImport.js file in the folder you copied, select it, and click Open. The script should now be installed and ready to be run.
+8. Locate the ParaParams.js file in the folder you copied, select it, and click Open. The script should now be installed and ready to be run.
 
 The script should be ready to run.
 
@@ -35,21 +35,36 @@ The script should be ready to run.
 
   ![Image of ParaParam Dialog](./resources/ParaParams-Step-7-ParaParam-Dialog.png)
 
-  - Which Parameter : Select the user parameter to modify
-  - Start Value : Initial value
-  - End Value : Last value
-  - Increment Value : The amount to increment each iteration
+  - Which Parameter :
+    - Select the single user parameter or optionally a CSV file containing multiple parameters to modify
+  - Single Parameter
+    - Start Value : Initial value
+    - End Value : Last value
+    - Increment Value : The amount to increment each iteration
   - Operation: Select the operation to perform each iteration
     - Value Only : Only change the parameter value
-    - Export to _Type_ : Export the design to specified type
-  - Pause Each Iteration : Pauses script each iteration
+    - Export to _Type_ : Export the design to specified file type
+  - Restore Values On Finish : Will restore the original parameter values once finished.
 3. Click OK to begin
 
-Note, after the script has run the design changes may be undone using Edit -> Undo.
+Note, after the script has run the design changes may be undone using Edit -> Undo.  Or, checkmark the "Restore Values On Finish".
+
+### CSV Parameters
+
+A comma separated value (CSV) file may be used to specify which parameters and values to change.  The format of the file is:
+
+<pre>Parameter Name, Start Value, End Value, Step/Increment Value</pre>
+
+For example, the following would modify the "Diameter" and "Height" parameters for all combinations of values:
+
+<pre>
+Diameter,1,5,2
+Height,1,3,0.5
+</pre>
 
 ### Iterations
 
-The start, end, and increment values define the iteration and the values that are assigned to the selected user parameter. For example, if your design has a user parameter "Height" that you would like to set to values from 1 to 4 inches every 0.5 inches then you would specify:
+The start, end, and step/increment values define the iteration and the values that are assigned to the selected user parameter. For example, if your design has a user parameter "Height" that you would like to set to values from 1 to 4 inches every 0.5 inches then you would specify:
 
 - Start Value = 1 in
 - End Value = 4 in
@@ -69,7 +84,7 @@ In essence, this is performing a [For loop](http://en.wikipedia.org/wiki/For_loo
 
 ### Export Operation
 
-The current design may be exported after each iteration. When one of the export operations is selected, the script will prompt for a filename to use for export.  The filename is used as a template for the exported files. For each iteration the specified filename has the user parameter name as well as the current iteration value appened to it.
+The current design may be exported after each iteration. When one of the export operations is selected, the script will prompt for a filename prefix to use for export.  The filename prefix also defines the folder to use for each exported file.  For each iteration the specified filename prefix has the user parameter names as well as the current iteration values appended to it.
 
 For example, if exporting STL with a filename of "MyModel" and the following settings:
 
@@ -116,15 +131,19 @@ Here is an example of using the script to export several variations of a design.
 
 9. In the settings dialog, select the "Teeth" parameter name, start value of 8, end value of 32, increment of 4, and operation to "Export to STL".
 
-  ![ParaParams settings](./resources/ParaParams-Step-7-ParaParam-Dialog.png)
+  ![ParaParams settings](./resources/ParaParams-Step-9-SpurGear-Teeth-Settings.png)
 
 10. Click OK to start the ball rolling
-11. Since an export operation was selected the script will prompt for a filename to export to.  Choose a folder and then enter a name without an extension. For example, create a new folder named "SpurGears" and then a filename of "Gear".  Click OK.
+11. Since an export operation was selected the script will prompt for a filename to export to.  Choose a folder and then enter a filename that will be the prefix.  Don't include an extension.  For example, create a new folder named "SpurGears" and then enter the filename prefix "Gear".  Click OK.
 12. The script should finish and the specified folder will now contain a series of STL files.  Each file containing the state of the design for at the specific iteration.
 
   ![SpurGear exported files](./resources/ParaParams-Step-8-SpurGear-Exports.png)
 
-Optionally, you may want to select Edit -> Undo to undo the changes to the design made by the ParaParam script.  That allows you to run again from the initial state.
+To restore the the parameter values changed by the addin, select Edit -> Undo.  Or, checkmark the "Restore Values On Finish" in the script dialog.
+
+## Sample File
+
+There's also a sample model file "ParaParamSample.f3d" and parameters file "ParaParamSample.csv" in the script folder.  The model contains a cylinder and torus that may be driven with user parameters.  The CSV file contains the parameters and may be selected when the ParaParam script is run.  This will cause the "Height" and "Diameter" values to be modified.
 
 ## Issues
 
