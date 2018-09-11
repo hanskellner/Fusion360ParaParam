@@ -188,6 +188,11 @@ function run(context) {
         return result; //btoa(result);
     };
 
+    var decode_utf8 = function(s)
+    {
+        return decodeURIComponent(escape(s));
+    }
+
     var LoadParamsCSVFile = function() {
 
         // prompt for the filename
@@ -203,7 +208,7 @@ function run(context) {
         // Read the csv file.
         var cnt = 0;
         var arrayBuffer = adsk.readFile(csvFilename);
-        var allLines = Uint8ToString(new Uint8Array(arrayBuffer));
+        var allLines = decode_utf8(Uint8ToString(new Uint8Array(arrayBuffer)));
 
         var linesCSV = allLines.split(/\r?\n/);
 
