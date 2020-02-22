@@ -44,6 +44,7 @@ The script should be ready to run.
   - Operation: Select the operation to perform each iteration
     - Value Only : Only change the parameter value
     - Export to _Type_ : Export the design to specified file type
+  - Export STL for each body : When "Export to STL" is selected and this is checked, an STL is generated for each body.
   - Restore Values On Finish : Will restore the original parameter values once finished.
 3. Click OK to begin
 
