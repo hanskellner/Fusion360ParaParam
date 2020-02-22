@@ -149,6 +149,9 @@ function run(context) {
             operInput.listItems.add('Export to STEP',false);
             operInput.listItems.add('Export to STL',false);
 
+            var exportSTLPerBody = inputs.addBoolValueInput('exportSTLPerBody', 'Export STL for each body', true);
+            exportSTLPerBody.value = false;
+
             var restoreValues = inputs.addBoolValueInput('restoreValues', 'Restore Values On Finish', true);
             restoreValues.value = false;
         }
@@ -162,15 +165,26 @@ function run(context) {
         eventArgs = adsk.core.InputChangedEventArgs(args);
 
         var cmdInput = eventArgs.input;
-        if (cmdInput != null && cmdInput.id == "param") {
-            var paramInput = adsk.core.DropDownCommandInput(cmdInput);
+        if (cmdInput != null)
+        {
+            if (cmdInput.id == "param") {
+                var paramInput = adsk.core.DropDownCommandInput(cmdInput);
 
-            var iParam = paramInput.selectedItem.index;
-            if (paramGroupInput) {
-                var enable = (iParam > 0);   // Enable/Disable group
-                //paramGroupInput.isEnabled = enable;
-                paramGroupInput.isExpanded = enable;
+                var iParam = paramInput.selectedItem.index;
+                if (paramGroupInput) {
+                    var enable = (iParam > 0);   // Enable/Disable group
+                    //paramGroupInput.isEnabled = enable;
+                    paramGroupInput.isExpanded = enable;
+                }
             }
+            /** TODO: Enable/Disable checkbox depending on operation
+            else if (cmdInput.id == "operation") {
+                //var exportInput = adsk.core.BoolValueCommandInput(cmdInput);
+                var operationInput = adsk.core.DropDownCommandInput(cmdInput);
+                var paramOperation = operationInput.selectedItem.index;
+                val bEnableBoolInput = (paramOperation == PARAM_OPERATION.EXPORT_STL);
+            }
+             */
         }
     };
 
@@ -260,7 +274,7 @@ function run(context) {
 
     // Now begin the param updates.  This is a recursive function which will
     // iterate over each param and update.
-    var UpdateParams = function(whichParam, paramValues, exportFilenamePrefix) {
+    var UpdateParams = function(whichParam, paramValues, exportFilenamePrefix, exportSTLPerBody) {
 
         var curParam = paramsInfo[whichParam];
 
@@ -305,7 +319,7 @@ function run(context) {
             var exportFilename = "";
             if (exportFilenamePrefix && exportFilenamePrefix !== "") {
                 // TODO: Better name based on all params
-                exportFilename = exportFilenamePrefix + '_' + curParam.name + '_' + val; // TODO value to string
+                exportFilename = exportFilenamePrefix + '_' + curParam.name + '_' + val;
             }
 
             // Is this a leaf node?
@@ -346,17 +360,40 @@ function run(context) {
                         break;
 
                     case PARAM_OPERATION.EXPORT_STL:
-                        var stlOptions = exportMgr.createSTLExportOptions(design.rootComponent, exportFilename+'.stl');
-                        //stlOptions.isBinaryFormat = true;
-                        //stlOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh;
-                        resExport = exportMgr.execute(stlOptions);
+
+                        if ( exportSTLPerBody ) {
+                            var bodies = design.rootComponent.bRepBodies;
+                            for (var iBodies=0; iBodies < bodies.count; iBodies++)
+                            {
+                                var body = bodies.item(iBodies);
+                                var name = body.name;
+                                console.log("STL Export Body '"+body+"' : Name '"+name+"'");
+
+                                // Create a clean filename
+                                var exportFilename = exportFilenamePrefix + '_' + name + '_' + curParam.name + '_' + val + '.stl';
+
+                                var stlOptions = exportMgr.createSTLExportOptions(body, exportFilename);
+
+                                //stlOptions.isBinaryFormat = true;
+                                //stlOptions.isBinaryFormat = true;
+                                //stlOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh;
+                                resExport = exportMgr.execute(stlOptions);
+                            }
+                        }
+                        else {
+                            var stlOptions = exportMgr.createSTLExportOptions(design.rootComponent, exportFilename+'.stl');
+                            //stlOptions.isBinaryFormat = true;
+                            //stlOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh;
+                            resExport = exportMgr.execute(stlOptions);
+                        }
+
                         break;
                 }
             }
             else { // Not a leaf node so iterate downward
 
                 for (var iParam = whichParam+1; iParam < paramsInfo.length; ++iParam) {
-                    UpdateParams(iParam, paramValues, exportFilename);
+                    UpdateParams(iParam, paramValues, exportFilename, false);
                 }
             }
         }
@@ -371,7 +408,7 @@ function run(context) {
             var command = adsk.core.Command(args.firingEvent.sender);
             var inputs = command.commandInputs;
 
-            var paramInput, valueStartInput, valueEndInput, valueStepInput, operationInput, restoreValuesInput;
+            var paramInput, valueStartInput, valueEndInput, valueStepInput, operationInput, exportSTLPerBodyInput, restoreValuesInput;
 
             // REVIEW: Problem with a problem - the inputs are empty at this point. We
             // need access to the inputs within a command during the execute.
@@ -392,12 +429,15 @@ function run(context) {
                 else if (input.id === 'operation') {
                     operationInput = adsk.core.DropDownCommandInput(input);
                 }
+                else if (input.id === 'exportSTLPerBody') {
+                    exportSTLPerBodyInput = adsk.core.BoolValueCommandInput(input);
+                }
                 else if (input.id === 'restoreValues') {
                     restoreValuesInput = adsk.core.BoolValueCommandInput(input);
                 }
             }
 
-            if (!paramInput || !valueStartInput || !valueEndInput || !valueStepInput || !operationInput || !restoreValuesInput) {
+            if (!paramInput || !valueStartInput || !valueEndInput || !valueStepInput || !operationInput || !exportSTLPerBodyInput || !restoreValuesInput) {
                 ui.messageBox("One of the inputs does not exist.");
                 return;
             }
@@ -508,7 +548,7 @@ function run(context) {
             //   for (j = 0; j < jCount; ++j)
             //     for (k = 0; k < kCount; ++k)
             //       print value(i,j,k)
-            UpdateParams(0, paramValues, exportFilenamePrefix);
+            UpdateParams(0, paramValues, exportFilenamePrefix, exportSTLPerBodyInput.value);
 
             // Restore original param values on finish?
             if ( restoreValuesInput.value ) {
