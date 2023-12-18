@@ -3,8 +3,8 @@
 	"type":	"script",
 	"author":	"Hans Kellner",
 	"description":	{
-		"":	"Parametrically drive a user parameter"
+		"":	"Parametrically modifying a user parameter."
 	},
 	"supportedOS":	"windows|mac",
-	"autodeskLibraries":	["application", "dashboard", "geometry", "materials", "userInterface", "utilities", "bRep", "components", "construction", "features", "fusion", "meshBody", "meshData", "sketch", "tSpline"]
+	"editEnabled":	true
 }
