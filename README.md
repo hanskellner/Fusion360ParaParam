@@ -6,9 +6,6 @@ It supports manually entering a range of values to iterate over for a specific u
 
 For each iteration an operation may be performed such as exporting to STL.  This is very useful for automating variations of a design and exporting those variations.
 
-![Image of ParaParam Dialog]
-(./resources/ParaParams-Step-07-ParaParam-Dialog.png)
-
 ## Installation
 
 Please see the most recent install instructions here:
