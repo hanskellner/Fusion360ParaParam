@@ -42,7 +42,7 @@ Note, after the script has run the design changes may be undone using Edit -> Un
 
 IMPORTANT: When exporting files, there isn't a check for overwriting of existing files with the same names.
 
-### CSV File
+### CSV File — Range Format
 
 A comma separated value (CSV) file may be used to specify which parameters and values to change.  The format of the file is:
 
@@ -75,11 +75,38 @@ That will assign the values [4, 3, 2, 1] to the user parameter.
 
 In essence, this is performing a [For loop](http://en.wikipedia.org/wiki/For_loop).
 
+### CSV File — Preset Format
+
+When you want to export a fixed set of named variants rather than iterate over ranges, use the **preset format**.  The format is detected automatically: if the first row is a header (parameter names rather than numbers), each subsequent row is treated as a named preset.
+
+<pre>name, Param1, Param2, ...</pre>
+
+- The first column (`name`) becomes the export filename.
+- Remaining columns must match user parameter names in the active design.
+- Parameters are set to the exact values specified — no iteration or Cartesian product.
+
+For example, given user parameters `Diameter` and `Height`:
+
+<pre>
+name,Diameter,Height
+SmallShort,10,5
+SmallTall,10,20
+LargeShort,50,5
+LargeTall,50,20
+</pre>
+
+This produces exactly four exports named after the `name` column:
+
+- "SmallShort.stl"
+- "SmallTall.stl"
+- "LargeShort.stl"
+- "LargeTall.stl"
+
 ### Export Operation
 
-The current design may be exported after each iteration. When one of the export operations is selected, the script will prompt for a folder to use for export.  For each iteration, a filename is generated which contains the current document name, user parameter names, as well as the current iteration values appended to it.
+The current design may be exported after each iteration. When one of the export operations is selected, the script will prompt for a folder to use for export.
 
-For example, if exporting STL with a document name of "MyModel" and the following settings:
+**Range format** — a filename is generated from the document name, parameter names, and current iteration values:
 
 - Parameter Name = "Height"
 - Start Value = 1 in
@@ -92,6 +119,8 @@ Then the filenames produced would be:
 - "MyModel_Height_2.stl"
 - "MyModel_Height_3.stl"
 - "MyModel_Height_4.stl"
+
+**Preset format** — the filename is taken directly from the `name` column of each row.
 
 ### Example Usage
 
