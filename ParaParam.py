@@ -361,7 +361,7 @@ def getCSVFile():
         fileDlg.filter = 'CSV Files (*.csv);;All Files (*.*)'
         if _csvFolder != '':
             fileDlg.initialDirectory = _csvFolder
-        
+
         # Show file open dialog
         dlgResult = fileDlg.showOpen()
         if dlgResult != adsk.core.DialogResults.DialogOK:
@@ -372,31 +372,51 @@ def getCSVFile():
         _csvFolder = os.path.dirname(fileDlg.filename)
         attribs.add('ParaParam', 'csvFolder', _csvFolder)
 
-        # Get the CSV file.
-        csv_params = []
+        # Read all rows first so we can detect the format.
         with open(fileDlg.filename) as csv_file:
+            all_rows = [r for r in csv.reader(csv_file) if r]  # skip blank lines
 
-            reader = csv.reader(csv_file)
+        if not all_rows:
+            return []
 
-            # Skip the header row.
-            #next(reader)
-
-            for csv_row in reader:
-                # Validate the row.
-                if len(csv_row) != 4:
-                    _ui.messageBox("Values missing in line - File: '" + fileDlg.filename + "' - Line '" + str(csv_row) + "'")
+        # --- Preset format detection ---
+        # If the second column of the first row is NOT a number, treat it as a
+        # header row: name, Param1, Param2, ...
+        # Each subsequent row is a named preset with one value per param.
+        if len(all_rows[0]) >= 2 and not is_number(all_rows[0][1]):
+            header = all_rows[0]
+            param_names = header[1:]  # everything after 'name'
+            presets = []
+            for csv_row in all_rows[1:]:
+                if len(csv_row) < len(header):
+                    _ui.messageBox("Values missing in preset row - File: '" + fileDlg.filename + "' - Line '" + str(csv_row) + "'")
                     return []
-                
-                for i in range(3):
-                    if is_number(csv_row[i+1]) == False:
-                        _ui.messageBox("Invalid value - File: " + fileDlg.filename + " - Line: '" + str(csv_row) + "'")
+                preset_name = csv_row[0]
+                params = {}
+                for i, pname in enumerate(param_names):
+                    val = csv_row[i + 1]
+                    if not is_number(val):
+                        _ui.messageBox("Invalid value in preset row - File: " + fileDlg.filename + " - Line: '" + str(csv_row) + "'")
                         return []
+                    params[pname] = float(val)
+                presets.append({'name': preset_name, 'params': params})
+            # Signal preset format by wrapping in a dict
+            return {'format': 'preset', 'presets': presets}
 
-                # Add the row to the list but convert the values to floats.
-                csv_params.append([csv_row[0], float(csv_row[1]), float(csv_row[2]), float(csv_row[3])])
+        # --- Original range format: ParameterName, Start, End, Step ---
+        csv_params = []
+        for csv_row in all_rows:
+            if len(csv_row) != 4:
+                _ui.messageBox("Values missing in line - File: '" + fileDlg.filename + "' - Line '" + str(csv_row) + "'")
+                return []
+            for i in range(3):
+                if is_number(csv_row[i+1]) == False:
+                    _ui.messageBox("Invalid value - File: " + fileDlg.filename + " - Line: '" + str(csv_row) + "'")
+                    return []
+            csv_params.append([csv_row[0], float(csv_row[1]), float(csv_row[2]), float(csv_row[3])])
 
         return csv_params
-    
+
     except:
         if _ui:
             _ui.messageBox('ParaParam Failed:\n{}'.format(traceback.format_exc()))
@@ -528,6 +548,90 @@ def updateParams(paraParams, paramIndex, paramValues, exportSTLPerBody, operatio
             for paramIndex2 in range(paramIndex + 1, len(paramValues)):
                 updateParams(paraParams, paramIndex2, paramValues, False, operation)
 
+def doPresetParam(presets, operation, exportSTLPerBody, restoreValues):
+    """Handle preset-format CSV: one STL per row, named after the 'name' column."""
+    try:
+        global _exportFolder
+
+        des = adsk.fusion.Design.cast(_app.activeProduct)
+
+        # Collect all param names used across presets
+        all_param_names = []
+        for preset in presets:
+            for pname in preset['params']:
+                if pname not in all_param_names:
+                    all_param_names.append(pname)
+
+        # Save original param values so we can restore later
+        original_values = {}
+        for pname in all_param_names:
+            userParam = des.userParameters.itemByName(pname)
+            if userParam is None:
+                _ui.messageBox("User parameter not found in design: '" + pname + "'")
+                return
+            original_values[pname] = userParam.expression
+
+        # Prompt for export folder if an export operation is selected
+        if operation != _OPERATIONS[_OP_LOOP_ONLY]:
+            folderDlg = _ui.createFolderDialog()
+            folderDlg.title = 'Select Export Folder'
+            if _exportFolder != '':
+                folderDlg.initialDirectory = _exportFolder
+            if folderDlg.showDialog() != adsk.core.DialogResults.DialogOK:
+                return
+            attribs = des.attributes
+            _exportFolder = folderDlg.folder
+            attribs.add('ParaParam', 'exportFolder', _exportFolder)
+
+        for preset in presets:
+            # Apply all parameter values for this preset
+            for pname, value in preset['params'].items():
+                userParam = des.userParameters.itemByName(pname)
+                if userParam:
+                    userParam.expression = str(value)
+
+            adsk.doEvents()
+            _app.activeViewport.refresh()
+
+            if operation == _OPERATIONS[_OP_LOOP_ONLY]:
+                continue
+
+            exportFilename = _exportFolder + '/' + preset['name']
+            exportMgr = des.exportManager
+
+            if operation == _OPERATIONS[_OP_EXPORT_FUSION]:
+                exportMgr.execute(exportMgr.createFusionArchiveExportOptions(exportFilename + '.f3d'))
+            elif operation == _OPERATIONS[_OP_EXPORT_IGES]:
+                exportMgr.execute(exportMgr.createIGESExportOptions(exportFilename + '.igs'))
+            elif operation == _OPERATIONS[_OP_EXPORT_SAT]:
+                exportMgr.execute(exportMgr.createSATExportOptions(exportFilename + '.sat'))
+            elif operation == _OPERATIONS[_OP_EXPORT_SMT]:
+                exportMgr.execute(exportMgr.createSMTExportOptions(exportFilename + '.smt'))
+            elif operation == _OPERATIONS[_OP_EXPORT_STEP]:
+                exportMgr.execute(exportMgr.createSTEPExportOptions(exportFilename + '.step'))
+            elif operation == _OPERATIONS[_OP_EXPORT_STL]:
+                if exportSTLPerBody and des.rootComponent.bRepBodies.count > 0:
+                    bodies = des.rootComponent.bRepBodies
+                    for iBodies in range(bodies.count):
+                        body = bodies.item(iBodies)
+                        stlOptions = exportMgr.createSTLExportOptions(body, exportFilename + '.stl')
+                        exportMgr.execute(stlOptions)
+                else:
+                    stlOptions = exportMgr.createSTLExportOptions(des.rootComponent, exportFilename + '.stl')
+                    exportMgr.execute(stlOptions)
+
+        # Restore original param values if requested
+        if restoreValues:
+            for pname, expr in original_values.items():
+                userParam = des.userParameters.itemByName(pname)
+                if userParam:
+                    userParam.expression = expr
+
+    except:
+        if _ui:
+            _ui.messageBox('doPresetParam Failed:\n{}'.format(traceback.format_exc()))
+
+
 def doParaParam(operation, userParamName, startValue, endValue, stepValue, exportSTLPerBody, restoreValues):
     try:
 
@@ -539,7 +643,14 @@ def doParaParam(operation, userParamName, startValue, endValue, stepValue, expor
 
         # Use param CSV file?
         if userParamName == '':
-            paraParams = getCSVFile()
+            csv_result = getCSVFile()
+
+            # Preset format (header row detected): delegate to doPresetParam
+            if isinstance(csv_result, dict) and csv_result.get('format') == 'preset':
+                doPresetParam(csv_result['presets'], operation, exportSTLPerBody, restoreValues)
+                return
+
+            paraParams = csv_result
         else:
             # Add single param row to the list.
             paraParams.append([userParamName, startValue, endValue, stepValue])
